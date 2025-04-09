@@ -4,7 +4,7 @@ import { Header } from "@/components/dashboard/header";
 import { Sidebar } from "@/components/ui/sidebar";
 import { ContentCard } from "@/components/ui/dashboard-card";
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Assignment } from "@shared/schema";
 import { format, isPast, isToday, isTomorrow, addDays } from "date-fns";
 import { 
@@ -13,7 +13,8 @@ import {
   Calendar, 
   Clock, 
   CheckCircle, 
-  AlertTriangle
+  AlertTriangle,
+  Trash2
 } from "lucide-react";
 import { AssignmentSkeleton } from "@/components/ui/content-skeletons";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { toast } from "sonner";
 
 export default function AssignmentsPage() {
   const { user } = useAuth();
@@ -33,6 +35,7 @@ export default function AssignmentsPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState<"all" | "pending" | "overdue" | "upcoming">("all");
+  const queryClient = useQueryClient();
 
   // Check if we're on mobile
   useEffect(() => {
@@ -57,6 +60,31 @@ export default function AssignmentsPage() {
   const { data: assignments, isLoading } = useQuery<Assignment[]>({
     queryKey: ["/api/assignments"],
   });
+
+  // Delete assignment mutation
+  const deleteAssignmentMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/assignments/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to delete assignment');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/assignments'] });
+      toast.success('Assignment deleted successfully');
+    },
+    onError: () => {
+      toast.error('Failed to delete assignment');
+    },
+  });
+
+  const handleDelete = (id: number) => {
+    if (window.confirm('Are you sure you want to delete this assignment?')) {
+      deleteAssignmentMutation.mutate(id);
+    }
+  };
 
   // Determine due date status
   const getDueDateStatus = (dueDate: Date) => {
@@ -194,27 +222,12 @@ export default function AssignmentsPage() {
       },
     },
     {
-      key: "submissions",
-      header: "Submissions",
-      cell: (_assignment: Assignment) => {
-        // Mock data for submissions - in a real app, this would come from the backend
-        const total = Math.floor(Math.random() * 20) + 10;
-        const submitted = Math.floor(Math.random() * total);
-        return <span className="text-sm text-[#2C3E50]">{submitted}/{total}</span>;
-      },
-    },
-    {
       key: "actions",
       header: "Actions",
       cell: (_assignment: Assignment) => (
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="text-[#1976D2]">
-            Grade
-          </Button>
-          <Button size="sm" className="bg-[#1976D2] hover:bg-[#1976D2]/90">
-            View
-          </Button>
-        </div>
+        <Button size="sm" className="bg-[#1976D2] hover:bg-[#1976D2]/90">
+          View
+        </Button>
       ),
     },
   ];

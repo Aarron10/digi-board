@@ -92,12 +92,6 @@ export function Sidebar({ isMobile, showMobileMenu, setShowMobileMenu }: Sidebar
       roles: ["student", "teacher", "admin"],
     },
     {
-      path: "/grade",
-      label: "Grade Assignments",
-      icon: <CheckCircleIcon className="h-5 w-5" />,
-      roles: ["teacher", "admin"],
-    },
-    {
       path: "/create",
       label: "Create Content",
       icon: <PlusIcon className="h-5 w-5" />,

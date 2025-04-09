@@ -11,6 +11,7 @@ import MaterialsPage from "@/pages/materials-page";
 import SchedulePage from "@/pages/schedule-page";
 import UserManagementPage from "@/pages/user-management-page";
 import CreateContentPage from "@/pages/create-content-page";
+import ProfilePage from "@/pages/profile-page";
 import { ProtectedRoute } from "./lib/protected-route";
 import { AuthProvider } from "./hooks/use-auth";
 
@@ -25,6 +26,7 @@ function Router() {
       <ProtectedRoute path="/schedule" component={SchedulePage} />
       <ProtectedRoute path="/users" component={UserManagementPage} />
       <ProtectedRoute path="/create" component={CreateContentPage} />
+      <ProtectedRoute path="/profile" component={ProfilePage} />
       <Route component={NotFound} />
     </Switch>
   );

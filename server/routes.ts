@@ -5,6 +5,9 @@ import { setupAuth } from "./auth";
 import { insertAnnouncementSchema, insertAssignmentSchema, insertMaterialSchema, insertEventSchema, insertUserSchema } from "@shared/schema";
 import { z } from "zod";
 import { hashPassword } from "./auth";
+import { upload, getFileUrl } from "./file-upload";
+import path from "path";
+import fs from "fs";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up authentication routes
@@ -130,7 +133,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/materials", async (req, res, next) => {
+  app.post("/api/materials", upload.single("file"), async (req, res, next) => {
     try {
       if (!req.isAuthenticated()) return res.sendStatus(401);
       const user = req.user as Express.User;
@@ -139,10 +142,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (user.role !== "teacher" && user.role !== "admin") {
         return res.status(403).json({ message: "Unauthorized role" });
       }
+
+      // Get file URL if file was uploaded
+      const fileUrl = req.file ? getFileUrl(req.file.filename) : undefined;
       
       const validatedData = insertMaterialSchema.parse({
         ...req.body,
         teacherId: user.id,
+        fileUrl,
       });
       
       const material = await storage.createMaterial(validatedData);
@@ -177,6 +184,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(materials);
     } catch (error) {
       next(error);
+    }
+  });
+
+  // Delete routes
+  app.delete("/api/announcements/:id", async (req, res, next) => {
+    try {
+      if (!req.isAuthenticated()) return res.sendStatus(401);
+      const user = req.user as Express.User;
+      
+      // Only teachers and admins can delete announcements
+      if (user.role !== "teacher" && user.role !== "admin") {
+        return res.status(403).json({ message: "Unauthorized role" });
+      }
+      
+      const id = parseInt(req.params.id);
+      await storage.deleteAnnouncement(id);
+      res.sendStatus(204);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/assignments/:id", async (req, res, next) => {
+    try {
+      if (!req.isAuthenticated()) return res.sendStatus(401);
+      const user = req.user as Express.User;
+      
+      // Only teachers and admins can delete assignments
+      if (user.role !== "teacher" && user.role !== "admin") {
+        return res.status(403).json({ message: "Unauthorized role" });
+      }
+      
+      const id = parseInt(req.params.id);
+      await storage.deleteAssignment(id);
+      res.sendStatus(204);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/materials/:id", async (req, res, next) => {
+    try {
+      if (!req.isAuthenticated()) return res.sendStatus(401);
+      const user = req.user as Express.User;
+      
+      // Only teachers and admins can delete materials
+      if (user.role !== "teacher" && user?.role !== "admin") {
+        return res.status(403).json({ message: "Unauthorized role" });
+      }
+      
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid material ID" });
+      }
+      
+      // Get the material first to get the file path
+      const material = await storage.getMaterial(id);
+      if (!material) {
+        return res.status(404).json({ message: "Material not found" });
+      }
+      
+      // Delete the file if it exists
+      if (material.fileUrl) {
+        const filename = material.fileUrl.split('/').pop();
+        if (filename) {
+          const filePath = path.join(__dirname, 'fileuploads', filename);
+          try {
+            // Check if file exists before trying to delete
+            if (fs.existsSync(filePath)) {
+              await fs.promises.unlink(filePath);
+            }
+          } catch (error) {
+            console.error('Error deleting file:', error);
+            // Continue with material deletion even if file deletion fails
+          }
+        }
+      }
+      
+      // Delete the material record
+      await storage.deleteMaterial(id);
+      
+      // Send a proper response with no content
+      res.setHeader('Content-Length', '0');
+      res.status(204).end();
+    } catch (error) {
+      console.error('Error in material deletion:', error);
+      res.status(500).json({ 
+        message: "An error occurred while deleting the material",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   });
 

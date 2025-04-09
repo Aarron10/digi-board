@@ -1,9 +1,9 @@
 import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 import { MobileMenuButton } from "@/components/ui/sidebar";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { Bell, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +18,7 @@ interface HeaderProps {
 
 export function Header({ toggleMobileMenu }: HeaderProps) {
   const { user, logoutMutation } = useAuth();
-  const [notificationCount] = useState(3);
+  const [, navigate] = useLocation();
 
   const handleLogout = () => {
     logoutMutation.mutate();
@@ -48,17 +48,6 @@ export function Header({ toggleMobileMenu }: HeaderProps) {
         </div>
 
         <div className="flex items-center space-x-4">
-          <div className="relative" id="notification-container">
-            <button className="p-2 rounded-full hover:bg-gray-100 relative">
-              <Bell className="h-6 w-6 text-[#2C3E50]" />
-              {notificationCount > 0 && (
-                <span className="absolute top-1 right-1 bg-[#FF5722] text-white text-xs font-bold rounded-full h-4 w-4 flex items-center justify-center">
-                  {notificationCount}
-                </span>
-              )}
-            </button>
-          </div>
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <div className="flex items-center cursor-pointer">
@@ -87,7 +76,7 @@ export function Header({ toggleMobileMenu }: HeaderProps) {
                 <p className="text-xs text-[#2C3E50]/60 capitalize">{user?.role}</p>
               </div>
               <DropdownMenuSeparator className="md:hidden" />
-              <DropdownMenuItem>Profile</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/profile")}>Profile</DropdownMenuItem>
               <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} disabled={logoutMutation.isPending}>

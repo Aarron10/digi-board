@@ -49,7 +49,7 @@ export function AdminDashboard() {
       title: "Announcements",
       description: "Create school-wide announcements",
       variant: "accent" as const,
-      icon: <Bell className="h-10 w-10 text-[#FF5722] mb-2" />,
+      icon: <FileText className="h-10 w-10 text-[#FF5722] mb-2" />,
       action: {
         label: "New Announcement",
         onClick: () => window.location.href = "/create",

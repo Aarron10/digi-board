@@ -265,10 +265,6 @@ export default function AuthPage() {
               title="Event Scheduling" 
               description="Keep track of important dates and upcoming events"
             />
-            <FeatureItem 
-              title="Mobile Friendly" 
-              description="Access from any device with a responsive design"
-            />
           </div>
         </div>
       </div>

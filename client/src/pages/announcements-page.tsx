@@ -4,13 +4,14 @@ import { Header } from "@/components/dashboard/header";
 import { Sidebar } from "@/components/ui/sidebar";
 import { ContentCard } from "@/components/ui/dashboard-card";
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Announcement } from "@shared/schema";
 import { format } from "date-fns";
-import { Bell, Search, Filter } from "lucide-react";
+import { Bell, Search, Filter, Plus, Trash2, AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { AnnouncementSkeleton } from "@/components/ui/content-skeletons";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 export default function AnnouncementsPage() {
   const { user } = useAuth();
@@ -19,6 +20,7 @@ export default function AnnouncementsPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState<"all" | "important" | "recent">("all");
+  const queryClient = useQueryClient();
 
   // Check if we're on mobile
   useEffect(() => {
@@ -43,6 +45,31 @@ export default function AnnouncementsPage() {
   const { data: announcements, isLoading } = useQuery<Announcement[]>({
     queryKey: ["/api/announcements"],
   });
+
+  // Delete announcement mutation
+  const deleteAnnouncementMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(`/api/announcements/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        throw new Error('Failed to delete announcement');
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/announcements'] });
+      toast.success('Announcement deleted successfully');
+    },
+    onError: () => {
+      toast.error('Failed to delete announcement');
+    },
+  });
+
+  const handleDelete = (id: number) => {
+    if (window.confirm('Are you sure you want to delete this announcement?')) {
+      deleteAnnouncementMutation.mutate(id);
+    }
+  };
 
   // Filter and search announcements
   const filteredAnnouncements = announcements
@@ -138,7 +165,7 @@ export default function AnnouncementsPage() {
               </>
             ) : filteredAnnouncements.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 bg-white rounded-lg shadow p-6">
-                <Bell className="h-16 w-16 text-[#1976D2]/30 mb-4" />
+                <AlertCircle className="h-16 w-16 text-[#1976D2]/30 mb-4" />
                 <h3 className="text-xl font-medium text-[#2C3E50] mb-2">No announcements found</h3>
                 <p className="text-[#2C3E50]/70 text-center max-w-md">
                   {searchTerm
@@ -194,6 +221,24 @@ export default function AnnouncementsPage() {
                       </Button>
                     </div>
                   )}
+                  <div className="flex justify-between items-center mt-auto">
+                    <span className="text-xs text-[#2C3E50]/60">
+                      {format(new Date(announcement.createdAt), "MMM d, yyyy")}
+                    </span>
+                    <div className="flex gap-2">
+                      {(user?.role === "teacher" || user?.role === "admin") && (
+                        <Button 
+                          size="sm" 
+                          variant="destructive"
+                          className="flex items-center gap-1"
+                          onClick={() => handleDelete(announcement.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="hidden sm:inline">Delete</span>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 </ContentCard>
               ))
             )}

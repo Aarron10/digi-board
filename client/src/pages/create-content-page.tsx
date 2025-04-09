@@ -247,25 +247,54 @@ export default function CreateContentPage() {
   async function onAssignmentSubmit(data: z.infer<typeof assignmentFormSchema>) {
     try {
       setIsSubmitting(true);
-      // Add teacherId from user context
-      const assignmentData = {
-        ...data,
-        teacherId: user?.id as number,
-      };
       
-      // Make real API call
-      await apiRequest("POST", "/api/assignments", assignmentData);
-      queryClient.invalidateQueries({ queryKey: ["/api/assignments"] });
+      // Format the date and time properly
+      const [hours, minutes] = data.dueTime.split(":").map(Number);
+      const dueDate = new Date(data.dueDate);
+      dueDate.setHours(hours, minutes, 0, 0);
+      
+      // Prepare the assignment data according to the schema
+      const assignmentData = {
+        title: data.title,
+        description: data.description,
+        dueDate: dueDate.toISOString(),
+        teacherId: user?.id,
+        classId: data.classId || null,
+        status: data.status || "active"
+      };
+
+      console.log('Sending assignment data:', assignmentData); // Debug log
+      
+      // Make API call
+      const response = await fetch('/api/assignments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Important for session cookies
+        body: JSON.stringify(assignmentData),
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        console.error('Server error response:', responseData); // Debug log
+        throw new Error(responseData.message || 'Failed to create assignment');
+      }
+
+      // Invalidate queries to refresh the assignments list
+      queryClient.invalidateQueries({ queryKey: ['/api/assignments'] });
       
       toast({
         title: "Success",
-        description: "Assignment has been created",
+        description: "Assignment has been created successfully",
       });
       
+      // Reset form and navigate to assignments page
       assignmentForm.reset();
       navigate("/assignments");
     } catch (error) {
-      console.error(error);
+      console.error('Assignment creation error:', error); // Debug log
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to create assignment",
@@ -366,7 +395,6 @@ export default function CreateContentPage() {
           <Tabs defaultValue="announcement" className="w-full">
             <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
               <TabsTrigger value="announcement" className="flex items-center gap-2">
-                <Bell className="h-4 w-4" />
                 <span>Announcement</span>
               </TabsTrigger>
               <TabsTrigger value="assignment" className="flex items-center gap-2">

@@ -27,6 +27,7 @@ export interface IStorage {
   createAnnouncement(announcement: InsertAnnouncement): Promise<Announcement>;
   updateAnnouncement(id: number, announcement: Partial<Announcement>): Promise<Announcement | undefined>;
   getAllAnnouncements(): Promise<Announcement[]>;
+  deleteAnnouncement(id: number): Promise<void>;
   
   // Assignment operations
   getAssignment(id: number): Promise<Assignment | undefined>;
@@ -34,6 +35,7 @@ export interface IStorage {
   updateAssignment(id: number, assignment: Partial<Assignment>): Promise<Assignment | undefined>;
   getAllAssignments(): Promise<Assignment[]>;
   getAssignmentsByTeacher(teacherId: number): Promise<Assignment[]>;
+  deleteAssignment(id: number): Promise<void>;
   
   // Material operations
   getMaterial(id: number): Promise<Material | undefined>;
@@ -41,6 +43,7 @@ export interface IStorage {
   updateMaterial(id: number, material: Partial<Material>): Promise<Material | undefined>;
   getAllMaterials(): Promise<Material[]>;
   getMaterialsByTeacher(teacherId: number): Promise<Material[]>;
+  deleteMaterial(id: number): Promise<void>;
   
   // Event operations
   getEvent(id: number): Promise<Event | undefined>;
@@ -183,6 +186,14 @@ export class MemStorage implements IStorage {
     return Array.from(this.announcements.values());
   }
 
+  async deleteAnnouncement(id: number): Promise<void> {
+    if (!this.announcements.has(id)) {
+      throw new Error("Announcement not found");
+    }
+    
+    this.announcements.delete(id);
+  }
+
   // Assignment operations
   async getAssignment(id: number): Promise<Assignment | undefined> {
     return this.assignments.get(id);
@@ -219,6 +230,14 @@ export class MemStorage implements IStorage {
     return Array.from(this.assignments.values()).filter(
       (assignment) => assignment.teacherId === teacherId
     );
+  }
+
+  async deleteAssignment(id: number): Promise<void> {
+    if (!this.assignments.has(id)) {
+      throw new Error("Assignment not found");
+    }
+    
+    this.assignments.delete(id);
   }
 
   // Material operations
@@ -258,6 +277,14 @@ export class MemStorage implements IStorage {
     return Array.from(this.materials.values()).filter(
       (material) => material.teacherId === teacherId
     );
+  }
+
+  async deleteMaterial(id: number): Promise<void> {
+    if (!this.materials.has(id)) {
+      throw new Error("Material not found");
+    }
+    
+    this.materials.delete(id);
   }
 
   // Event operations
@@ -373,6 +400,17 @@ export class DatabaseStorage implements IStorage {
     return this.db.select().from(announcements);
   }
   
+  async deleteAnnouncement(id: number): Promise<void> {
+    const result = await this.db
+      .delete(announcements)
+      .where(eq(announcements.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("Announcement not found");
+    }
+  }
+  
   // Assignment operations
   async getAssignment(id: number): Promise<Assignment | undefined> {
     const result = await this.db.select().from(assignments).where(eq(assignments.id, id));
@@ -400,6 +438,17 @@ export class DatabaseStorage implements IStorage {
     return this.db.select().from(assignments).where(eq(assignments.teacherId, teacherId));
   }
   
+  async deleteAssignment(id: number): Promise<void> {
+    const result = await this.db
+      .delete(assignments)
+      .where(eq(assignments.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("Assignment not found");
+    }
+  }
+  
   // Material operations
   async getMaterial(id: number): Promise<Material | undefined> {
     const result = await this.db.select().from(materials).where(eq(materials.id, id));
@@ -425,6 +474,17 @@ export class DatabaseStorage implements IStorage {
   
   async getMaterialsByTeacher(teacherId: number): Promise<Material[]> {
     return this.db.select().from(materials).where(eq(materials.teacherId, teacherId));
+  }
+  
+  async deleteMaterial(id: number): Promise<void> {
+    const result = await this.db
+      .delete(materials)
+      .where(eq(materials.id, id))
+      .returning();
+    
+    if (result.length === 0) {
+      throw new Error("Material not found");
+    }
   }
   
   // Event operations

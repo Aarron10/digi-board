@@ -82,21 +82,11 @@ export function TeacherDashboard() {
       },
     },
     {
-      key: "submissions",
-      header: "Submissions",
-      cell: (_assignment: Assignment) => {
-        // Mock data for submissions - in a real app, this would come from the backend
-        const total = Math.floor(Math.random() * 20) + 10;
-        const submitted = Math.floor(Math.random() * total);
-        return <span className="text-sm text-[#2C3E50]">{submitted}/{total}</span>;
-      },
-    },
-    {
       key: "actions",
       header: "Actions",
       cell: (_assignment: Assignment) => (
         <button className="text-[#1976D2] hover:text-[#1976D2]/80 font-medium">
-          Grade
+          View
         </button>
       ),
     },
@@ -195,11 +185,7 @@ export function TeacherDashboard() {
           Teacher Dashboard
         </h1>
         <p className="text-[#2C3E50]/70">
-          Welcome back, {user?.name}. You have{" "}
-          <span className="text-[#FF5722] font-medium">
-            {pendingAssignments.length} assignments
-          </span>{" "}
-          to grade.
+          Welcome back, {user?.name}.
         </p>
       </div>
 
@@ -229,7 +215,7 @@ export function TeacherDashboard() {
         {/* Pending Assignments */}
         <div className="lg:col-span-2">
           <ContentCard
-            title="Pending Assignments"
+            title="Recent Assignments"
             action={{
               label: "View All",
               onClick: () => window.location.href = "/assignments",
@@ -244,7 +230,7 @@ export function TeacherDashboard() {
                 ) : (
                   <div className="flex flex-col items-center p-6">
                     <PlusIcon className="h-12 w-12 text-[#1976D2]/30 mb-2" />
-                    <p className="text-[#2C3E50]/70">No pending assignments</p>
+                    <p className="text-[#2C3E50]/70">No assignments yet</p>
                     <Link href="/create">
                       <a className="mt-2 text-[#1976D2] hover:underline">Create one</a>
                     </Link>

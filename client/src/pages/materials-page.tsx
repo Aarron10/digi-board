@@ -4,7 +4,7 @@ import { Header } from "@/components/dashboard/header";
 import { Sidebar } from "@/components/ui/sidebar";
 import { ContentCard } from "@/components/ui/dashboard-card";
 import { Button } from "@/components/ui/button";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Material } from "@shared/schema";
 import { format } from "date-fns";
 import { 
@@ -12,7 +12,8 @@ import {
   Search, 
   FileIcon,
   Download,
-  ExternalLink
+  ExternalLink,
+  Trash2
 } from "lucide-react";
 import { MaterialsSkeleton } from "@/components/ui/content-skeletons";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { FileViewerDialog } from "@/components/ui/file-viewer-dialog";
+import { useToast } from "@/hooks/use-toast";
 
 export default function MaterialsPage() {
   const { user } = useAuth();
@@ -31,6 +34,62 @@ export default function MaterialsPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [viewingMaterial, setViewingMaterial] = useState<Material | null>(null);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Delete material mutation
+  const deleteMaterialMutation = useMutation({
+    mutationFn: async (id: number) => {
+      try {
+        const response = await fetch(`/api/materials/${id}`, {
+          method: 'DELETE',
+        });
+        
+        if (response.status === 204) {
+          return; // Success case - no content
+        }
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Failed to delete material' }));
+          throw new Error(errorData.message || 'Failed to delete material');
+        }
+      } catch (error) {
+        console.error('Delete error:', error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/materials'] });
+      toast({
+        title: "Success",
+        description: "Material deleted successfully",
+      });
+    },
+    onError: (error) => {
+      console.error('Delete mutation error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to delete material",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleDelete = (id: number) => {
+    if (window.confirm('Are you sure you want to delete this material?')) {
+      try {
+        deleteMaterialMutation.mutate(id);
+      } catch (error) {
+        console.error('Error in handleDelete:', error);
+        toast({
+          title: "Error",
+          description: "An unexpected error occurred while deleting the material",
+          variant: "destructive",
+        });
+      }
+    }
+  };
 
   // Check if we're on mobile
   useEffect(() => {
@@ -226,19 +285,25 @@ export default function MaterialsPage() {
                               Added by Teacher
                             </span>
                             <div className="flex gap-2">
-                              {material.fileUrl && (
-                                <Button size="sm" variant="outline" className="flex items-center gap-1">
-                                  <Download className="h-4 w-4" />
-                                  <span className="hidden sm:inline">Download</span>
-                                </Button>
-                              )}
                               <Button 
                                 size="sm" 
                                 className="bg-[#1976D2] hover:bg-[#1976D2]/90 flex items-center gap-1"
+                                onClick={() => setViewingMaterial(material)}
                               >
                                 <ExternalLink className="h-4 w-4" />
                                 <span className="hidden sm:inline">View</span>
                               </Button>
+                              {(user?.role === "teacher" || user?.role === "admin") && (
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  className="flex items-center gap-1"
+                                  onClick={() => handleDelete(material.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  <span className="hidden sm:inline">Delete</span>
+                                </Button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -251,6 +316,12 @@ export default function MaterialsPage() {
           )}
         </main>
       </div>
+
+      {/* File Viewer Dialog */}
+      <FileViewerDialog 
+        material={viewingMaterial} 
+        onClose={() => setViewingMaterial(null)} 
+      />
     </div>
   );
 }
