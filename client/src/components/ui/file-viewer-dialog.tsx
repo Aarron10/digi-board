@@ -30,7 +30,9 @@ export function FileViewerDialog({ material, onClose }: FileViewerDialogProps) {
 
     // Function to get Google Docs Viewer URL
     const getGoogleDocsViewerUrl = (url: string) => {
-      return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+      // Convert relative URL to absolute URL for Google Docs Viewer
+      const absoluteUrl = new URL(url, window.location.origin).toString();
+      return `https://docs.google.com/viewer?url=${encodeURIComponent(absoluteUrl)}&embedded=true`;
     };
 
     switch (fileType) {
@@ -78,6 +80,8 @@ export function FileViewerDialog({ material, onClose }: FileViewerDialogProps) {
         );
       case 'doc':
       case 'docx':
+      case 'ppt':
+      case 'pptx':
         return (
           <div className="flex flex-col h-[70vh]">
             <div className="flex justify-end mb-2">

@@ -46,7 +46,9 @@ import {
   insertAnnouncementSchema,
   insertAssignmentSchema,
   insertMaterialSchema,
-  insertEventSchema
+  insertEventSchema,
+  materials,
+  events
 } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { format } from "date-fns";
@@ -56,6 +58,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { cn } from "@/lib/utils";
+
+type MaterialFormData = {
+  title: string;
+  description: string;
+  fileUpload?: File;
+  classId?: string;
+  category?: string;
+};
 
 export default function CreateContentPage() {
   const { user } = useAuth();
@@ -100,57 +111,59 @@ export default function CreateContentPage() {
   });
 
   // Assignment form schema
-  const assignmentFormSchema = insertAssignmentSchema.extend({
-    teacherId: z.number().optional(), // Will be set from the user context
+  const assignmentFormSchema = z.object({
+    title: z.string().min(1, "Title is required"),
+    description: z.string().min(1, "Description is required"),
     dueDate: z.date({
-      required_error: "A due date is required",
+      required_error: "Due date is required",
+      invalid_type_error: "Invalid date format",
     }),
-    dueTime: z.string().min(1, "A due time is required"),
-  }).transform((data) => {
-    // Combine date and time
-    const [hours, minutes] = data.dueTime.split(":").map(Number);
-    const dueDateTime = new Date(data.dueDate);
-    dueDateTime.setHours(hours, minutes);
-
-    return {
-      ...data,
-      dueDate: dueDateTime,
-    };
+    dueTime: z.string().min(1, "Due time is required"),
+    classId: z.string().optional(),
+    status: z.string().optional(),
   });
 
   // Material form schema
-  const materialFormSchema = insertMaterialSchema.extend({
-    teacherId: z.number().optional(), // Will be set from the user context
-    fileUpload: z.instanceof(File).optional(),
+  const materialFormSchema = z.object({
+    title: z.string().min(1, "Title is required"),
+    description: z.string().min(1, "Description is required"),
+    fileUpload: z.instanceof(File, { message: "File is required" }),
+    classId: z.string().optional(),
+    category: z.string().optional(),
   });
 
+  // Event form schema types
+  interface EventFormValues {
+    title: string;
+    description: string;
+    startDate: Date | null;
+    startTime: string;
+    endDate: Date | null;
+    endTime: string;
+    location: string;
+    createdBy?: number;
+    important: boolean;
+    category: string;
+  }
+
   // Event form schema
-  const eventFormSchema = insertEventSchema.extend({
-    createdBy: z.number().optional(), // Will be set from the user context
+  const eventFormSchema = z.object({
+    title: z.string().min(1, "Title is required"),
+    description: z.string().min(1, "Description is required"),
     startDate: z.date({
       required_error: "Start date is required",
+      invalid_type_error: "Invalid start date",
     }),
-    startTime: z.string().min(1, "Start time is required"),
+    startTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Invalid time format (HH:MM)"),
     endDate: z.date({
       required_error: "End date is required",
+      invalid_type_error: "Invalid end date",
     }),
-    endTime: z.string().min(1, "End time is required"),
-  }).transform((data) => {
-    // Combine date and time for start
-    const [startHours, startMinutes] = data.startTime.split(":").map(Number);
-    const startDateTime = new Date(data.startDate);
-    startDateTime.setHours(startHours, startMinutes);
-
-    // Combine date and time for end
-    const [endHours, endMinutes] = data.endTime.split(":").map(Number);
-    const endDateTime = new Date(data.endDate);
-    endDateTime.setHours(endHours, endMinutes);
-
-    return {
-      ...data,
-      startDate: startDateTime,
-      endDate: endDateTime,
-    };
+    endTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, "Invalid time format (HH:MM)"),
+    location: z.string().optional(),
+    createdBy: z.number().optional(),
+    important: z.boolean().default(false),
+    category: z.string().optional(),
   });
 
   // Forms
@@ -173,6 +186,7 @@ export default function CreateContentPage() {
       classId: "",
       status: "active",
       dueTime: "23:59",
+      dueDate: new Date(), // Set default to current date
     },
   });
 
@@ -181,22 +195,24 @@ export default function CreateContentPage() {
     defaultValues: {
       title: "",
       description: "",
-      fileUrl: "",
+      fileUpload: undefined,
       classId: "",
       category: "",
     },
   });
 
-  const eventForm = useForm<z.infer<typeof eventFormSchema>>({
+  const eventForm = useForm<EventFormValues>({
     resolver: zodResolver(eventFormSchema),
     defaultValues: {
       title: "",
       description: "",
+      startDate: null,
+      startTime: "09:00",
+      endDate: null,
+      endTime: "10:00",
       location: "",
       important: false,
       category: "",
-      startTime: "09:00",
-      endTime: "10:00",
     },
   });
 
@@ -244,57 +260,40 @@ export default function CreateContentPage() {
     }
   }
 
-  async function onAssignmentSubmit(data: z.infer<typeof assignmentFormSchema>) {
+  const onAssignmentSubmit = async (values: z.infer<typeof assignmentFormSchema>) => {
     try {
       setIsSubmitting(true);
       
-      // Format the date and time properly
-      const [hours, minutes] = data.dueTime.split(":").map(Number);
-      const dueDate = new Date(data.dueDate);
-      dueDate.setHours(hours, minutes, 0, 0);
+      // Format the due date and time
+      const dueDateTime = new Date(values.dueDate);
+      const [hours, minutes] = values.dueTime.split(':');
+      dueDateTime.setHours(parseInt(hours), parseInt(minutes));
       
-      // Prepare the assignment data according to the schema
-      const assignmentData = {
-        title: data.title,
-        description: data.description,
-        dueDate: dueDate.toISOString(),
+      // Prepare the assignment data
+      const { dueTime, ...assignmentData } = {
+        ...values,
+        dueDate: dueDateTime.toISOString(),
         teacherId: user?.id,
-        classId: data.classId || null,
-        status: data.status || "active"
+        status: values.status || "active",
       };
-
-      console.log('Sending assignment data:', assignmentData); // Debug log
       
-      // Make API call
-      const response = await fetch('/api/assignments', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include', // Important for session cookies
-        body: JSON.stringify(assignmentData),
-      });
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        console.error('Server error response:', responseData); // Debug log
-        throw new Error(responseData.message || 'Failed to create assignment');
-      }
-
-      // Invalidate queries to refresh the assignments list
-      queryClient.invalidateQueries({ queryKey: ['/api/assignments'] });
+      // Make the API request
+      await apiRequest("POST", "/api/assignments", assignmentData);
       
+      // Show success message
       toast({
         title: "Success",
-        description: "Assignment has been created successfully",
+        description: "Assignment created successfully",
       });
       
-      // Reset form and navigate to assignments page
+      // Reset the form
       assignmentForm.reset();
-      navigate("/assignments");
+      
+      // Invalidate the assignments query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ["assignments"] });
+      
     } catch (error) {
-      console.error('Assignment creation error:', error); // Debug log
+      console.error("Error creating assignment:", error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to create assignment",
@@ -303,64 +302,182 @@ export default function CreateContentPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
-  async function onMaterialSubmit(data: z.infer<typeof materialFormSchema>) {
+  const onMaterialSubmit = async (data: z.infer<typeof materialFormSchema>) => {
     try {
       setIsSubmitting(true);
-      // Add teacherId from user context
-      const materialData = {
-        ...data,
-        teacherId: user?.id as number,
-        // Handle fileUrl with a fallback value if needed
-        fileUrl: data.fileUrl || "https://example.com/file.pdf",
-      };
       
-      // Make real API call
-      await apiRequest("POST", "/api/materials", materialData);
-      queryClient.invalidateQueries({ queryKey: ["/api/materials"] });
+      if (!data.fileUpload) {
+        throw new Error("Please select a file to upload");
+      }
+
+      const formData = new FormData();
+      formData.append("title", data.title);
+      formData.append("description", data.description);
+      formData.append("file", data.fileUpload);
+      if (data.classId) {
+        formData.append("classId", data.classId);
+      }
+      if (data.category) {
+        formData.append("category", data.category);
+      }
+
+      console.log("Submitting material data:", {
+        title: data.title,
+        description: data.description,
+        file: {
+          name: data.fileUpload.name,
+          type: data.fileUpload.type,
+          size: data.fileUpload.size
+        },
+        classId: data.classId,
+        category: data.category
+      });
+
+      const response = await fetch("/api/materials", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+
+      console.log("Response status:", response.status);
+      console.log("Response headers:", Object.fromEntries(response.headers.entries()));
+
+      let responseData;
+      const responseText = await response.text();
+      console.log("Raw response:", responseText);
       
+      try {
+        responseData = JSON.parse(responseText);
+        console.log("Parsed response data:", responseData);
+      } catch (e) {
+        console.error("Failed to parse response:", e);
+        throw new Error("Invalid server response");
+      }
+
+      if (!response.ok) {
+        console.error("Server error response:", responseData);
+        if (responseData.error) {
+          throw new Error(responseData.error);
+        }
+        if (responseData.message) {
+          throw new Error(responseData.message);
+        }
+        if (responseData.details) {
+          throw new Error(responseData.details);
+        }
+        throw new Error("Failed to create material");
+      }
+
       toast({
         title: "Success",
-        description: "Study material has been uploaded",
+        description: "Material created successfully",
       });
-      
+      queryClient.invalidateQueries({ queryKey: ["materials"] });
       materialForm.reset();
-      navigate("/materials");
     } catch (error) {
-      console.error(error);
+      console.error("Error creating material:", error);
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to upload material",
+        description: error instanceof Error ? error.message : "Failed to create material",
         variant: "destructive",
       });
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
 
-  async function onEventSubmit(data: z.infer<typeof eventFormSchema>) {
+  async function onEventSubmit(data: EventFormValues) {
     try {
       setIsSubmitting(true);
-      // Add createdBy from user context
+      
+      if (!data.startDate || !data.endDate) {
+        throw new Error("Start date and end date are required");
+      }
+      
+      // Combine date and time for start
+      const startDateTime = new Date(data.startDate);
+      const [startHours, startMinutes] = data.startTime.split(':');
+      startDateTime.setHours(parseInt(startHours), parseInt(startMinutes));
+      
+      // Combine date and time for end
+      const endDateTime = new Date(data.endDate);
+      const [endHours, endMinutes] = data.endTime.split(':');
+      endDateTime.setHours(parseInt(endHours), parseInt(endMinutes));
+      
+      // Validate dates
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        throw new Error("Invalid date or time format");
+      }
+      
+      if (endDateTime < startDateTime) {
+        throw new Error("End date/time must be after start date/time");
+      }
+      
+      // Add createdBy from user context and ensure dates are in ISO format
       const eventData = {
-        ...data,
+        title: data.title,
+        description: data.description,
+        startDate: startDateTime.toISOString(),
+        endDate: endDateTime.toISOString(),
+        location: data.location || null,
         createdBy: user?.id as number,
+        important: data.important || false,
+        category: data.category || null,
       };
       
+      console.log('Sending event data:', eventData);
+      
       // Make real API call
-      await apiRequest("POST", "/api/events", eventData);
+      const response = await fetch('/api/events', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(eventData),
+      });
+
+      console.log('Response status:', response.status);
+      
+      let responseData;
+      const responseText = await response.text();
+      try {
+        responseData = JSON.parse(responseText);
+        console.log('Response data:', responseData);
+      } catch (e) {
+        console.error('Failed to parse response as JSON:', responseText);
+        throw new Error('Invalid server response');
+      }
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to create event';
+        if (responseData?.message) {
+          errorMessage = responseData.message;
+        }
+        if (responseData?.errors) {
+          console.error('Validation errors:', responseData.errors);
+          errorMessage += ': ' + JSON.stringify(responseData.errors);
+        }
+        if (responseData?.details) {
+          console.error('Error details:', responseData.details);
+        }
+        throw new Error(errorMessage);
+      }
+      
+      // Invalidate the events query to refresh the list
       queryClient.invalidateQueries({ queryKey: ["/api/events"] });
       
       toast({
         title: "Success",
-        description: "Event has been created",
+        description: "Event created successfully",
       });
       
       eventForm.reset();
       navigate("/schedule");
     } catch (error) {
-      console.error(error);
+      console.error("Error creating event:", error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to create event",
@@ -370,6 +487,59 @@ export default function CreateContentPage() {
       setIsSubmitting(false);
     }
   }
+
+  // Form field components
+  const DateInput = ({ 
+    value, 
+    onChange, 
+    onBlur, 
+    name, 
+    ref 
+  }: { 
+    value: Date | null; 
+    onChange: (value: Date) => void; 
+    onBlur: () => void; 
+    name: string; 
+    ref: React.Ref<any>; 
+  }) => {
+    const dateValue = value instanceof Date 
+      ? value.toISOString().split('T')[0]
+      : '';
+    
+    return (
+      <Input
+        type="date"
+        value={dateValue}
+        onChange={(e) => onChange(new Date(e.target.value))}
+        onBlur={onBlur}
+        name={name}
+        ref={ref}
+      />
+    );
+  };
+
+  const TimeInput = ({ 
+    value, 
+    onChange, 
+    onBlur, 
+    name, 
+    ref 
+  }: { 
+    value: string; 
+    onChange: (value: string) => void; 
+    onBlur: () => void; 
+    name: string; 
+    ref: React.Ref<any>; 
+  }) => (
+    <Input
+      type="time"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      name={name}
+      ref={ref}
+    />
+  );
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F5F7FA]">
@@ -456,7 +626,7 @@ export default function CreateContentPage() {
                           <FormItem>
                             <FormLabel>Category</FormLabel>
                             <FormControl>
-                              <Input placeholder="E.g., Academic, Event, Notice" {...field} />
+                              <Input placeholder="E.g., Academic, Event, Notice" {...field} value={field.value ?? ""} />
                             </FormControl>
                             <FormDescription>
                               Categorize your announcement for better organization
@@ -472,7 +642,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Target Audience</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select audience" />
@@ -506,7 +676,7 @@ export default function CreateContentPage() {
                         <FormItem className="flex flex-row items-start space-x-3 space-y-0">
                           <FormControl>
                             <Checkbox
-                              checked={field.value}
+                              checked={field.value ?? false}
                               onCheckedChange={field.onChange}
                             />
                           </FormControl>
@@ -585,7 +755,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Class</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select class" />
@@ -613,7 +783,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Status</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select status" />
@@ -645,10 +815,11 @@ export default function CreateContentPage() {
                               <PopoverTrigger asChild>
                                 <FormControl>
                                   <Button
-                                    variant="outline"
-                                    className={`w-full pl-3 text-left font-normal ${
+                                    variant={"outline"}
+                                    className={cn(
+                                      "w-full pl-3 text-left font-normal",
                                       !field.value && "text-muted-foreground"
-                                    }`}
+                                    )}
                                   >
                                     {field.value ? (
                                       format(field.value, "PPP")
@@ -665,15 +836,12 @@ export default function CreateContentPage() {
                                   selected={field.value}
                                   onSelect={field.onChange}
                                   disabled={(date) =>
-                                    date < new Date(new Date().setHours(0, 0, 0, 0))
+                                    date < new Date()
                                   }
                                   initialFocus
                                 />
                               </PopoverContent>
                             </Popover>
-                            <FormDescription>
-                              The date when the assignment is due
-                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -686,7 +854,13 @@ export default function CreateContentPage() {
                           <FormItem>
                             <FormLabel>Due Time</FormLabel>
                             <FormControl>
-                              <Input type="time" {...field} />
+                              <TimeInput 
+                                value={field.value}
+                                onChange={field.onChange}
+                                onBlur={field.onBlur}
+                                name={field.name}
+                                ref={field.ref}
+                              />
                             </FormControl>
                             <FormDescription>
                               The time when the assignment is due
@@ -757,47 +931,59 @@ export default function CreateContentPage() {
                     
                     <FormField
                       control={materialForm.control}
-                      name="fileUrl"
+                      name="fileUpload"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>File URL</FormLabel>
+                          <FormLabel>File</FormLabel>
                           <FormControl>
-                            <Input placeholder="Enter file URL or upload below" {...field} />
+                            <div 
+                              className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:border-[#1976D2] transition-colors"
+                              onClick={() => document.getElementById('file-upload')?.click()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const file = e.dataTransfer.files[0];
+                                if (file) {
+                                  field.onChange(file);
+                                  toast({
+                                    title: "File ready for upload",
+                                    description: `${file.name} has been selected for upload`,
+                                    variant: "default",
+                                  });
+                                }
+                              }}
+                              onDragOver={(e) => e.preventDefault()}
+                            >
+                              <Upload className="h-8 w-8 mx-auto text-[#1976D2]/50 mb-2" />
+                              <p className="text-[#2C3E50]">Drag and drop files here, or click to browse</p>
+                              <p className="text-[#2C3E50]/60 text-sm mt-1">Supports PDF, DOC, PPT, and other document formats</p>
+                              {field.value && (
+                                <div className="mt-4 p-2 bg-[#1976D2]/10 rounded-md">
+                                  <p className="text-[#1976D2] font-medium">Selected file: {field.value.name}</p>
+                                  <p className="text-[#2C3E50]/60 text-sm">{(field.value.size / 1024 / 1024).toFixed(2)} MB</p>
+                                </div>
+                              )}
+                              <Input 
+                                type="file" 
+                                className="hidden" 
+                                id="file-upload" 
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    field.onChange(file);
+                                    toast({
+                                      title: "File ready for upload",
+                                      description: `${file.name} has been selected for upload`,
+                                      variant: "default",
+                                    });
+                                  }
+                                }}
+                              />
+                            </div>
                           </FormControl>
-                          <FormDescription>
-                            Enter a URL to an existing file or upload below
-                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    
-                    <div className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center">
-                      <Upload className="h-8 w-8 mx-auto text-[#1976D2]/50 mb-2" />
-                      <p className="text-[#2C3E50]">Drag and drop files here, or click to browse</p>
-                      <p className="text-[#2C3E50]/60 text-sm mt-1">Supports PDF, DOC, PPT, and other document formats</p>
-                      <Input 
-                        type="file" 
-                        className="hidden" 
-                        id="file-upload" 
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            materialForm.setValue('fileUpload', file);
-                            // In a real app, would handle file upload and update fileUrl
-                            materialForm.setValue('fileUrl', URL.createObjectURL(file));
-                          }
-                        }}
-                      />
-                      <Button 
-                        type="button" 
-                        variant="outline" 
-                        className="mt-4"
-                        onClick={() => document.getElementById('file-upload')?.click()}
-                      >
-                        Select File
-                      </Button>
-                    </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <FormField
@@ -806,7 +992,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Class</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select class" />
@@ -834,7 +1020,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Category</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select category" />
@@ -940,35 +1126,17 @@ export default function CreateContentPage() {
                             control={eventForm.control}
                             name="startDate"
                             render={({ field }) => (
-                              <FormItem className="flex flex-col">
+                              <FormItem>
                                 <FormLabel>Start Date</FormLabel>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <FormControl>
-                                      <Button
-                                        variant="outline"
-                                        className={`w-full pl-3 text-left font-normal ${
-                                          !field.value && "text-muted-foreground"
-                                        }`}
-                                      >
-                                        {field.value ? (
-                                          format(field.value, "PPP")
-                                        ) : (
-                                          <span>Pick a date</span>
-                                        )}
-                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                      </Button>
-                                    </FormControl>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                      mode="single"
-                                      selected={field.value}
-                                      onSelect={field.onChange}
-                                      initialFocus
-                                    />
-                                  </PopoverContent>
-                                </Popover>
+                                <FormControl>
+                                  <DateInput 
+                                    value={field.value ? new Date(field.value) : null}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    name={field.name}
+                                    ref={field.ref}
+                                  />
+                                </FormControl>
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -981,7 +1149,13 @@ export default function CreateContentPage() {
                               <FormItem>
                                 <FormLabel>Start Time</FormLabel>
                                 <FormControl>
-                                  <Input type="time" {...field} />
+                                  <TimeInput 
+                                    value={field.value}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    name={field.name}
+                                    ref={field.ref}
+                                  />
                                 </FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -997,35 +1171,17 @@ export default function CreateContentPage() {
                             control={eventForm.control}
                             name="endDate"
                             render={({ field }) => (
-                              <FormItem className="flex flex-col">
+                              <FormItem>
                                 <FormLabel>End Date</FormLabel>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <FormControl>
-                                      <Button
-                                        variant="outline"
-                                        className={`w-full pl-3 text-left font-normal ${
-                                          !field.value && "text-muted-foreground"
-                                        }`}
-                                      >
-                                        {field.value ? (
-                                          format(field.value, "PPP")
-                                        ) : (
-                                          <span>Pick a date</span>
-                                        )}
-                                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                                      </Button>
-                                    </FormControl>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-auto p-0" align="start">
-                                    <Calendar
-                                      mode="single"
-                                      selected={field.value}
-                                      onSelect={field.onChange}
-                                      initialFocus
-                                    />
-                                  </PopoverContent>
-                                </Popover>
+                                <FormControl>
+                                  <DateInput 
+                                    value={field.value ? new Date(field.value) : null}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    name={field.name}
+                                    ref={field.ref}
+                                  />
+                                </FormControl>
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -1038,7 +1194,13 @@ export default function CreateContentPage() {
                               <FormItem>
                                 <FormLabel>End Time</FormLabel>
                                 <FormControl>
-                                  <Input type="time" {...field} />
+                                  <TimeInput 
+                                    value={field.value}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    name={field.name}
+                                    ref={field.ref}
+                                  />
                                 </FormControl>
                                 <FormMessage />
                               </FormItem>
@@ -1055,7 +1217,7 @@ export default function CreateContentPage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Category</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select onValueChange={field.onChange} value={field.value ?? undefined}>
                               <FormControl>
                                 <SelectTrigger>
                                   <SelectValue placeholder="Select category" />
@@ -1085,7 +1247,7 @@ export default function CreateContentPage() {
                           <FormItem className="flex flex-row items-start space-x-3 space-y-0 pt-8">
                             <FormControl>
                               <Checkbox
-                                checked={field.value}
+                                checked={field.value ?? false}
                                 onCheckedChange={field.onChange}
                               />
                             </FormControl>

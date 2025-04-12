@@ -5,10 +5,12 @@ import { materials, type Material, type InsertMaterial } from "@shared/schema";
 import { events, type Event, type InsertEvent } from "@shared/schema";
 import session from "express-session";
 import createMemoryStore from "memorystore";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 import connectPg from "connect-pg-simple";
 import { eq } from "drizzle-orm";
+import { db, pool } from "./db";
+import type { NeonDatabase } from "drizzle-orm/neon-serverless";
+import path from "path";
+import fs from "fs";
 
 const MemoryStore = createMemoryStore(session);
 const PostgresSessionStore = connectPg(session);
@@ -43,7 +45,7 @@ export interface IStorage {
   updateMaterial(id: number, material: Partial<Material>): Promise<Material | undefined>;
   getAllMaterials(): Promise<Material[]>;
   getMaterialsByTeacher(teacherId: number): Promise<Material[]>;
-  deleteMaterial(id: number): Promise<void>;
+  deleteMaterial(id: number): Promise<boolean>;
   
   // Event operations
   getEvent(id: number): Promise<Event | undefined>;
@@ -279,12 +281,10 @@ export class MemStorage implements IStorage {
     );
   }
 
-  async deleteMaterial(id: number): Promise<void> {
-    if (!this.materials.has(id)) {
-      throw new Error("Material not found");
-    }
+  async deleteMaterial(id: number): Promise<boolean> {
+    if (!this.materials.has(id)) return false;
     
-    this.materials.delete(id);
+    return this.materials.delete(id);
   }
 
   // Event operations
@@ -320,22 +320,14 @@ export class MemStorage implements IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  private db: ReturnType<typeof drizzle>;
-  private client: ReturnType<typeof postgres>;
+  private db: NeonDatabase<typeof import("@shared/schema")>;
   sessionStore: any;
   
   constructor() {
-    // Initialize database connection
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error('DATABASE_URL environment variable is not set');
-    }
-    
-    this.client = postgres(connectionString);
-    this.db = drizzle(this.client);
+    this.db = db;
     this.sessionStore = new PostgresSessionStore({
       conObject: {
-        connectionString,
+        connectionString: process.env.DATABASE_URL,
       },
       createTableIfMissing: true,
     });
@@ -456,8 +448,18 @@ export class DatabaseStorage implements IStorage {
   }
   
   async createMaterial(material: InsertMaterial): Promise<Material> {
-    const result = await this.db.insert(materials).values(material).returning();
-    return result[0];
+    try {
+      console.log("Creating material in database:", material);
+      const result = await this.db.insert(materials).values(material).returning();
+      if (!result || result.length === 0) {
+        throw new Error("Failed to create material in database");
+      }
+      console.log("Material created successfully:", result[0]);
+      return result[0];
+    } catch (error) {
+      console.error("Error in createMaterial:", error);
+      throw error;
+    }
   }
   
   async updateMaterial(id: number, materialData: Partial<Material>): Promise<Material | undefined> {
@@ -476,14 +478,37 @@ export class DatabaseStorage implements IStorage {
     return this.db.select().from(materials).where(eq(materials.teacherId, teacherId));
   }
   
-  async deleteMaterial(id: number): Promise<void> {
-    const result = await this.db
-      .delete(materials)
-      .where(eq(materials.id, id))
-      .returning();
-    
-    if (result.length === 0) {
-      throw new Error("Material not found");
+  async deleteMaterial(id: number): Promise<boolean> {
+    try {
+      // First get the material to get the file path
+      const material = await this.getMaterial(id);
+      if (!material) {
+        return false;
+      }
+
+      // Delete the physical file if it exists
+      if (material.fileUrl) {
+        const filePath = path.join(__dirname, material.fileUrl);
+        try {
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        } catch (error) {
+          console.error('Error deleting file:', error);
+          // Continue with database deletion even if file deletion fails
+        }
+      }
+
+      // Delete from database
+      const result = await this.db
+        .delete(materials)
+        .where(eq(materials.id, id))
+        .returning();
+      
+      return result.length > 0;
+    } catch (error) {
+      console.error('Error deleting material:', error);
+      throw error;
     }
   }
   

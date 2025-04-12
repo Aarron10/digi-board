@@ -17,7 +17,8 @@ import {
   isSameDay, 
   addMonths, 
   subMonths,
-  isToday
+  isToday,
+  isWithinInterval
 } from "date-fns";
 import { 
   Loader2, 
@@ -27,12 +28,15 @@ import {
   Clock,
   MapPin,
   Tag,
-  Plus
+  Plus,
+  AlertCircle
 } from "lucide-react";
 import { useLocation } from "wouter";
+import { useToast } from "@/hooks/use-toast";
 
 export default function SchedulePage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [, navigate] = useLocation();
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -58,9 +62,16 @@ export default function SchedulePage() {
     setShowMobileMenu(!showMobileMenu);
   };
 
-  // Fetch events
-  const { data: events, isLoading } = useQuery<Event[]>({
+  // Fetch events with error handling
+  const { data: events, isLoading, error } = useQuery<Event[], Error>({
     queryKey: ["/api/events"],
+    queryFn: async () => {
+      const response = await fetch("/api/events");
+      if (!response.ok) {
+        throw new Error("Failed to fetch events");
+      }
+      return response.json();
+    },
   });
 
   // Calendar helpers
@@ -72,11 +83,18 @@ export default function SchedulePage() {
   const days = eachDayOfInterval({ start: startDate, end: endDate });
 
   // Find events for selected date
-  const selectedDateEvents = events?.filter(event => 
+  const selectedDateEvents = events?.filter((event: Event) => 
     isSameDay(new Date(event.startDate), selectedDate)
-  ).sort((a, b) => 
+  ).sort((a: Event, b: Event) => 
     new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
   ) || [];
+
+  // Get events for a specific day
+  const getEventsForDay = (day: Date) => {
+    return events?.filter((event: Event) => 
+      isSameDay(new Date(event.startDate), day)
+    ) || [];
+  };
 
   // Navigate between months
   const prevMonth = () => {
@@ -90,25 +108,36 @@ export default function SchedulePage() {
   // Calendar cell styles based on day
   const getCellStyles = (day: Date) => {
     const baseStyles = "h-10 w-10 rounded-full flex items-center justify-center cursor-pointer";
-    
-    // Check if day has events
-    const hasEvents = events?.some(event => 
-      isSameDay(new Date(event.startDate), day)
-    );
+    const dayEvents = getEventsForDay(day);
+    const hasEvents = dayEvents.length > 0;
+    const hasImportantEvents = dayEvents.some((event: Event) => event.important);
     
     if (isSameDay(day, selectedDate)) {
       return `${baseStyles} bg-[#1976D2] text-white`;
     } else if (isToday(day)) {
       return `${baseStyles} bg-[#1976D2]/20 text-[#1976D2] font-bold`;
     } else if (isSameMonth(day, currentDate)) {
-      if (hasEvents) {
+      if (hasImportantEvents) {
         return `${baseStyles} hover:bg-gray-100 font-medium text-[#2C3E50] border-b-2 border-[#FF5722]`;
+      } else if (hasEvents) {
+        return `${baseStyles} hover:bg-gray-100 font-medium text-[#2C3E50] border-b-2 border-[#1976D2]`;
       }
       return `${baseStyles} hover:bg-gray-100 text-[#2C3E50]`;
     } else {
       return `${baseStyles} text-[#2C3E50]/30`;
     }
   };
+
+  // Show error toast if there's an error
+  useEffect(() => {
+    if (error) {
+      toast({
+        title: "Error",
+        description: "Failed to load events. Please try again later.",
+        variant: "destructive",
+      });
+    }
+  }, [error, toast]);
 
   return (
     <div className="flex flex-col min-h-screen bg-[#F5F7FA]">
@@ -150,6 +179,13 @@ export default function SchedulePage() {
                 {isLoading ? (
                   <div className="flex justify-center items-center h-64">
                     <Loader2 className="h-8 w-8 animate-spin text-[#1976D2]" />
+                  </div>
+                ) : error ? (
+                  <div className="flex flex-col items-center justify-center h-64">
+                    <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
+                    <p className="text-[#2C3E50]/70 text-center">
+                      Failed to load events. Please try again later.
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -207,6 +243,13 @@ export default function SchedulePage() {
                   <div className="flex justify-center items-center h-64">
                     <Loader2 className="h-8 w-8 animate-spin text-[#1976D2]" />
                   </div>
+                ) : error ? (
+                  <div className="flex flex-col items-center justify-center h-64">
+                    <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
+                    <p className="text-[#2C3E50]/70 text-center">
+                      Failed to load events. Please try again later.
+                    </p>
+                  </div>
                 ) : selectedDateEvents.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-64">
                     <CalendarIcon className="h-16 w-16 text-[#1976D2]/30 mb-4" />
@@ -225,7 +268,7 @@ export default function SchedulePage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {selectedDateEvents.map((event) => (
+                    {selectedDateEvents.map((event: Event) => (
                       <div 
                         key={event.id} 
                         className={`p-4 rounded-lg border-l-4 ${

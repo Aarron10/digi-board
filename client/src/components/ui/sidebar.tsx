@@ -103,12 +103,6 @@ export function Sidebar({ isMobile, showMobileMenu, setShowMobileMenu }: Sidebar
       icon: <UsersIcon className="h-5 w-5" />,
       roles: ["admin"],
     },
-    {
-      path: "/settings",
-      label: "System Settings",
-      icon: <SettingsIcon className="h-5 w-5" />,
-      roles: ["admin"],
-    },
   ];
 
   return (

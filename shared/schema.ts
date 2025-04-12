@@ -73,14 +73,32 @@ export const insertAnnouncementSchema = createInsertSchema(announcements).pick({
   audience: true,
 });
 
-export const insertAssignmentSchema = createInsertSchema(assignments).pick({
-  title: true,
-  description: true,
-  dueDate: true,
-  teacherId: true,
-  classId: true,
-  status: true,
-});
+export const insertAssignmentSchema = createInsertSchema(assignments)
+  .pick({
+    title: true,
+    description: true,
+    dueDate: true,
+    teacherId: true,
+    classId: true,
+    status: true,
+  })
+  .extend({
+    dueDate: z.union([z.date(), z.string()]).transform((val) => {
+      if (typeof val === 'string') {
+        return new Date(val);
+      }
+      return val;
+    }),
+  })
+  .transform((data) => {
+    // Ensure dueDate is properly converted to Date object if it's a string
+    const dueDate = typeof data.dueDate === 'string' ? new Date(data.dueDate) : data.dueDate;
+    
+    return {
+      ...data,
+      dueDate,
+    };
+  });
 
 export const insertMaterialSchema = createInsertSchema(materials).pick({
   title: true,
@@ -89,18 +107,37 @@ export const insertMaterialSchema = createInsertSchema(materials).pick({
   teacherId: true,
   classId: true,
   category: true,
+}).extend({
+  title: z.string().min(1, "Title is required"),
+  description: z.string().min(1, "Description is required"),
+  fileUrl: z.string().min(1, "File is required"),
+  teacherId: z.number().int().positive(),
+  classId: z.string().optional(),
+  category: z.string().optional(),
 });
 
-export const insertEventSchema = createInsertSchema(events).pick({
-  title: true,
-  description: true,
-  startDate: true,
-  endDate: true,
-  location: true,
-  createdBy: true,
-  important: true,
-  category: true,
-});
+export const insertEventSchema = createInsertSchema(events)
+  .pick({
+    title: true,
+    description: true,
+    startDate: true,
+    endDate: true,
+    location: true,
+    createdBy: true,
+    important: true,
+    category: true,
+  })
+  .transform((data) => {
+    // Ensure dates are properly converted to Date objects if they're strings
+    const startDate = typeof data.startDate === 'string' ? new Date(data.startDate) : data.startDate;
+    const endDate = typeof data.endDate === 'string' ? new Date(data.endDate) : data.endDate;
+    
+    return {
+      ...data,
+      startDate,
+      endDate,
+    };
+  });
 
 // Types for insert operations
 export type InsertUser = z.infer<typeof insertUserSchema>;

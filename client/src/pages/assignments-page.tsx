@@ -14,7 +14,8 @@ import {
   Clock, 
   CheckCircle, 
   AlertTriangle,
-  Trash2
+  Trash2,
+  ExternalLink
 } from "lucide-react";
 import { AssignmentSkeleton } from "@/components/ui/content-skeletons";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { AssignmentViewerDialog } from "@/components/ui/assignment-viewer-dialog";
 
 export default function AssignmentsPage() {
   const { user } = useAuth();
@@ -35,6 +37,7 @@ export default function AssignmentsPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState<"all" | "pending" | "overdue" | "upcoming">("all");
+  const [viewingAssignment, setViewingAssignment] = useState<Assignment | null>(null);
   const queryClient = useQueryClient();
 
   // Check if we're on mobile
@@ -66,17 +69,24 @@ export default function AssignmentsPage() {
     mutationFn: async (id: number) => {
       const response = await fetch(`/api/assignments/${id}`, {
         method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
+
       if (!response.ok) {
-        throw new Error('Failed to delete assignment');
+        const error = await response.json();
+        throw new Error(error.error || "Failed to delete assignment");
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/assignments'] });
-      toast.success('Assignment deleted successfully');
+      toast.success("Assignment deleted successfully");
     },
-    onError: () => {
-      toast.error('Failed to delete assignment');
+    onError: (error) => {
+      console.error('Delete mutation error:', error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete assignment");
     },
   });
 
@@ -128,6 +138,18 @@ export default function AssignmentsPage() {
         )
         .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
     : [];
+
+  // Group assignments by class
+  const assignmentsByClass = filteredAssignments.reduce((acc, assignment) => {
+    const classId = assignment.classId || "General";
+    if (!acc[classId]) {
+      acc[classId] = [];
+    }
+    acc[classId].push(assignment);
+    return acc;
+  }, {} as Record<string, Assignment[]>);
+
+  const hasFilteredAssignments = Object.keys(assignmentsByClass).length > 0;
 
   // Student view columns
   const studentColumns = [
@@ -224,10 +246,25 @@ export default function AssignmentsPage() {
     {
       key: "actions",
       header: "Actions",
-      cell: (_assignment: Assignment) => (
-        <Button size="sm" className="bg-[#1976D2] hover:bg-[#1976D2]/90">
-          View
-        </Button>
+      cell: (assignment: Assignment) => (
+        <div className="flex gap-2">
+          <Button 
+            size="sm" 
+            className="bg-[#1976D2] hover:bg-[#1976D2]/90"
+            onClick={() => setViewingAssignment(assignment)}
+          >
+            View
+          </Button>
+          {(user?.role === "teacher" || user?.role === "admin") && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => handleDelete(assignment.id)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       ),
     },
   ];
@@ -309,39 +346,49 @@ export default function AssignmentsPage() {
           {/* Assignments List */}
           {isLoading ? (
             <AssignmentSkeleton />
-          ) : (
-            <ContentCard title="All Assignments">
-              {filteredAssignments.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64">
-                  <FileText className="h-16 w-16 text-[#1976D2]/30 mb-4" />
-                  <h3 className="text-xl font-medium text-[#2C3E50] mb-2">No assignments found</h3>
-                  <p className="text-[#2C3E50]/70 text-center max-w-md">
-                    {searchTerm
-                      ? "No assignments match your search criteria. Try a different search term."
-                      : filter !== "all"
-                      ? `No ${filter} assignments available. Try changing the filter.`
-                      : "There are no assignments available at this time."}
-                  </p>
-                  {(user?.role === "teacher" || user?.role === "admin") && (
-                    <Button 
-                      variant="outline" 
-                      className="mt-4"
-                      onClick={() => navigate("/create")}
-                    >
-                      Create Assignment
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <DataTable
-                  data={filteredAssignments}
-                  columns={user?.role === "student" ? studentColumns : teacherColumns}
-                />
+          ) : !hasFilteredAssignments ? (
+            <div className="flex flex-col items-center justify-center h-64 bg-white rounded-lg shadow p-6">
+              <FileText className="h-16 w-16 text-[#1976D2]/30 mb-4" />
+              <h3 className="text-xl font-medium text-[#2C3E50] mb-2">No assignments found</h3>
+              <p className="text-[#2C3E50]/70 text-center max-w-md">
+                {searchTerm
+                  ? "No assignments match your search criteria. Try a different search term."
+                  : filter !== "all"
+                  ? `No ${filter} assignments available. Try changing the filter.`
+                  : "There are no assignments available at this time."}
+              </p>
+              {(user?.role === "teacher" || user?.role === "admin") && (
+                <Button 
+                  variant="outline" 
+                  className="mt-4"
+                  onClick={() => navigate("/create")}
+                >
+                  Create Assignment
+                </Button>
               )}
-            </ContentCard>
+            </div>
+          ) : (
+            <Tabs defaultValue={Object.keys(assignmentsByClass)[0]} className="w-full">
+              {Object.entries(assignmentsByClass).map(([classId, assignments]) => (
+                <TabsContent key={classId} value={classId} className="mt-6">
+                  <ContentCard title={`${classId} Assignments`}>
+                    <DataTable
+                      columns={user?.role === "student" ? studentColumns : teacherColumns}
+                      data={assignments}
+                    />
+                  </ContentCard>
+                </TabsContent>
+              ))}
+            </Tabs>
           )}
         </main>
       </div>
+
+      {/* Assignment Viewer Dialog */}
+      <AssignmentViewerDialog 
+        assignment={viewingAssignment} 
+        onClose={() => setViewingAssignment(null)} 
+      />
     </div>
   );
 }

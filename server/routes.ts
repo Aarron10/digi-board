@@ -8,10 +8,18 @@ import { hashPassword } from "./auth";
 import { upload, getFileUrl } from "./file-upload";
 import path from "path";
 import fs from "fs";
+import express from "express";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up authentication routes
   setupAuth(app);
+
+  // Serve static files from fileuploads directory
+  app.use('/fileuploads', express.static(path.join(__dirname, 'fileuploads')));
 
   // Announcements routes
   app.get("/api/announcements", async (req, res, next) => {
@@ -75,24 +83,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/assignments", async (req, res, next) => {
     try {
-      if (!req.isAuthenticated()) return res.sendStatus(401);
+      // Check authentication
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      
       const user = req.user as Express.User;
       
-      // Only teachers and admins can create assignments
+      // Check user role
       if (user.role !== "teacher" && user.role !== "admin") {
         return res.status(403).json({ message: "Unauthorized role" });
       }
       
+      // Validate the request body
       const validatedData = insertAssignmentSchema.parse({
         ...req.body,
         teacherId: user.id,
+        status: req.body.status || "active",
       });
       
+      // Create the assignment
       const assignment = await storage.createAssignment(validatedData);
       res.status(201).json(assignment);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+        return res.status(400).json({ 
+          message: "Invalid assignment data", 
+          errors: error.errors 
+        });
       }
       next(error);
     }
@@ -133,32 +151,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/materials", upload.single("file"), async (req, res, next) => {
+  app.post("/api/materials", upload.single("file"), async (req, res) => {
     try {
-      if (!req.isAuthenticated()) return res.sendStatus(401);
-      const user = req.user as Express.User;
+      console.log("Received material creation request");
+      console.log("Request body:", req.body);
+      console.log("Request file:", req.file);
+      console.log("Request user:", req.user);
       
-      // Only teachers and admins can create materials
-      if (user.role !== "teacher" && user.role !== "admin") {
-        return res.status(403).json({ message: "Unauthorized role" });
+      // Check authentication
+      if (!req.user) {
+        console.log("Authentication check failed");
+        return res.status(401).json({ error: "Not authenticated" });
       }
 
-      // Get file URL if file was uploaded
-      const fileUrl = req.file ? getFileUrl(req.file.filename) : undefined;
-      
-      const validatedData = insertMaterialSchema.parse({
-        ...req.body,
-        teacherId: user.id,
-        fileUrl,
-      });
-      
-      const material = await storage.createMaterial(validatedData);
-      res.status(201).json(material);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+      // Check role authorization
+      if (req.user.role !== "teacher" && req.user.role !== "admin") {
+        console.log("Role check failed:", req.user.role);
+        return res.status(403).json({ error: "Only teachers and admins can create materials" });
       }
-      next(error);
+
+      // Check for file upload
+      if (!req.file) {
+        console.log("No file uploaded");
+        return res.status(400).json({ error: "Please upload a file" });
+      }
+
+      console.log("File uploaded successfully:", {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path
+      });
+
+      // Ensure uploads directory exists
+      const uploadsDir = path.join(__dirname, "fileuploads");
+      if (!fs.existsSync(uploadsDir)) {
+        console.log("Creating fileuploads directory");
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+
+      // Construct material data
+      const materialData = {
+        title: req.body.title,
+        description: req.body.description,
+        fileUrl: `/fileuploads/${req.file.filename}`,
+        teacherId: req.user.id,
+        classId: req.body.classId || undefined,
+        category: req.body.category || undefined,
+      };
+
+      console.log("Constructed material data:", materialData);
+
+      try {
+        // Validate material data
+        const validatedData = insertMaterialSchema.parse(materialData);
+        console.log("Data validation successful");
+
+        // Create material in database
+        const material = await storage.createMaterial(validatedData);
+        console.log("Material created successfully:", material);
+
+        res.status(201).json(material);
+      } catch (validationError) {
+        console.error("Validation error:", validationError);
+        // If validation fails, delete the uploaded file
+        if (req.file) {
+          const filePath = path.join(__dirname, req.file.path);
+          console.log("Attempting to delete file at:", filePath);
+          if (fs.existsSync(filePath)) {
+            console.log("Deleting uploaded file due to validation error");
+            try {
+              fs.unlinkSync(filePath);
+              console.log("File deleted successfully");
+            } catch (deleteError) {
+              console.error("Error deleting file:", deleteError);
+            }
+          } else {
+            console.log("File does not exist at path:", filePath);
+          }
+        }
+        throw validationError;
+      }
+    } catch (error) {
+      console.error("Error creating material:", error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: "Invalid data", 
+          details: error.errors,
+          message: error.errors.map(e => e.message).join(", ")
+        });
+      }
+      res.status(500).json({ 
+        error: "Failed to create material",
+        message: error instanceof Error ? error.message : "Unknown error occurred",
+        details: error instanceof Error ? error.stack : undefined
+      });
     }
   });
 
@@ -206,74 +294,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/assignments/:id", async (req, res, next) => {
+  app.delete("/api/assignments/:id", async (req, res) => {
     try {
-      if (!req.isAuthenticated()) return res.sendStatus(401);
-      const user = req.user as Express.User;
-      
-      // Only teachers and admins can delete assignments
-      if (user.role !== "teacher" && user.role !== "admin") {
-        return res.status(403).json({ message: "Unauthorized role" });
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
       }
-      
+
+      if (req.user.role !== "teacher" && req.user.role !== "admin") {
+        return res.status(403).json({ error: "Only teachers and admins can delete assignments" });
+      }
+
       const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid assignment ID" });
+      }
+
+      // Check if the assignment exists and belongs to the user
+      const assignment = await storage.getAssignment(id);
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+
+      if (assignment.teacherId !== req.user.id && req.user.role !== "admin") {
+        return res.status(403).json({ error: "You can only delete your own assignments" });
+      }
+
       await storage.deleteAssignment(id);
-      res.sendStatus(204);
+      res.status(204).send();
     } catch (error) {
-      next(error);
+      console.error("Error deleting assignment:", error);
+      if (error instanceof Error) {
+        return res.status(500).json({ error: error.message });
+      }
+      res.status(500).json({ error: "Failed to delete assignment" });
     }
   });
 
-  app.delete("/api/materials/:id", async (req, res, next) => {
+  app.delete("/api/materials/:id", async (req, res) => {
     try {
-      if (!req.isAuthenticated()) return res.sendStatus(401);
-      const user = req.user as Express.User;
-      
-      // Only teachers and admins can delete materials
-      if (user.role !== "teacher" && user?.role !== "admin") {
-        return res.status(403).json({ message: "Unauthorized role" });
+      if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
       }
-      
+
+      if (req.user.role !== "teacher" && req.user.role !== "admin") {
+        return res.status(403).json({ error: "Only teachers and admins can delete materials" });
+      }
+
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid material ID" });
+        return res.status(400).json({ error: "Invalid material ID" });
       }
-      
-      // Get the material first to get the file path
-      const material = await storage.getMaterial(id);
-      if (!material) {
-        return res.status(404).json({ message: "Material not found" });
+
+      const success = await storage.deleteMaterial(id);
+      if (!success) {
+        return res.status(404).json({ error: "Material not found" });
       }
-      
-      // Delete the file if it exists
-      if (material.fileUrl) {
-        const filename = material.fileUrl.split('/').pop();
-        if (filename) {
-          const filePath = path.join(__dirname, 'fileuploads', filename);
-          try {
-            // Check if file exists before trying to delete
-            if (fs.existsSync(filePath)) {
-              await fs.promises.unlink(filePath);
-            }
-          } catch (error) {
-            console.error('Error deleting file:', error);
-            // Continue with material deletion even if file deletion fails
-          }
-        }
-      }
-      
-      // Delete the material record
-      await storage.deleteMaterial(id);
-      
-      // Send a proper response with no content
-      res.setHeader('Content-Length', '0');
-      res.status(204).end();
+
+      res.status(204).send();
     } catch (error) {
-      console.error('Error in material deletion:', error);
-      res.status(500).json({ 
-        message: "An error occurred while deleting the material",
-        error: error instanceof Error ? error.message : "Unknown error"
-      });
+      console.error("Error deleting material:", error);
+      res.status(500).json({ error: "Failed to delete material" });
     }
   });
 
@@ -289,26 +369,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/events", async (req, res, next) => {
     try {
-      if (!req.isAuthenticated()) return res.sendStatus(401);
+      console.log('Received event creation request:', req.body);
+      
+      if (!req.isAuthenticated()) {
+        console.log('Authentication check failed');
+        return res.status(401).json({ message: "Not authenticated" });
+      }
+      
       const user = req.user as Express.User;
+      console.log('User role:', user.role);
       
       // Only teachers and admins can create events
       if (user.role !== "teacher" && user.role !== "admin") {
+        console.log('Role check failed:', user.role);
         return res.status(403).json({ message: "Unauthorized role" });
       }
       
+      // Parse and validate dates
+      const startDate = new Date(req.body.startDate);
+      const endDate = new Date(req.body.endDate);
+      
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        return res.status(400).json({ message: "Invalid date format" });
+      }
+      
+      if (endDate < startDate) {
+        return res.status(400).json({ message: "End date must be after start date" });
+      }
+      
+      // Validate and transform the data
       const validatedData = insertEventSchema.parse({
         ...req.body,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
         createdBy: user.id,
       });
       
+      console.log('Validated event data:', validatedData);
+      
+      // Create the event
       const event = await storage.createEvent(validatedData);
+      console.log('Created event:', event);
+      
+      // Send response
       res.status(201).json(event);
     } catch (error) {
+      console.error('Event creation error:', error);
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid data", errors: error.errors });
+        return res.status(400).json({ 
+          message: "Invalid data", 
+          errors: error.errors,
+          details: error.issues
+        });
       }
-      next(error);
+      res.status(500).json({ 
+        error: "Failed to create event",
+        message: error instanceof Error ? error.message : "Unknown error occurred"
+      });
     }
   });
 

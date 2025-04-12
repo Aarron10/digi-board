@@ -77,7 +77,6 @@ export function Header({ toggleMobileMenu }: HeaderProps) {
               </div>
               <DropdownMenuSeparator className="md:hidden" />
               <DropdownMenuItem onClick={() => navigate("/profile")}>Profile</DropdownMenuItem>
-              <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} disabled={logoutMutation.isPending}>
                 {logoutMutation.isPending ? "Logging out..." : "Logout"}

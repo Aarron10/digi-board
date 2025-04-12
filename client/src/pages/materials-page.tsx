@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/tabs";
 import { FileViewerDialog } from "@/components/ui/file-viewer-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function MaterialsPage() {
   const { user } = useAuth();
@@ -42,21 +43,12 @@ export default function MaterialsPage() {
   const deleteMaterialMutation = useMutation({
     mutationFn: async (id: number) => {
       try {
-        const response = await fetch(`/api/materials/${id}`, {
-          method: 'DELETE',
-        });
-        
-        if (response.status === 204) {
-          return; // Success case - no content
-        }
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: 'Failed to delete material' }));
-          throw new Error(errorData.message || 'Failed to delete material');
-        }
+        await apiRequest("DELETE", `/api/materials/${id}`);
       } catch (error) {
-        console.error('Delete error:', error);
-        throw error;
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error("Failed to delete material");
       }
     },
     onSuccess: () => {
@@ -78,16 +70,7 @@ export default function MaterialsPage() {
 
   const handleDelete = (id: number) => {
     if (window.confirm('Are you sure you want to delete this material?')) {
-      try {
-        deleteMaterialMutation.mutate(id);
-      } catch (error) {
-        console.error('Error in handleDelete:', error);
-        toast({
-          title: "Error",
-          description: "An unexpected error occurred while deleting the material",
-          variant: "destructive",
-        });
-      }
+      deleteMaterialMutation.mutate(id);
     }
   };
 

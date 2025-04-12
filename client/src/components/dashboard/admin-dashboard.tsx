@@ -2,13 +2,37 @@ import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardCard, ContentCard } from "@/components/ui/dashboard-card";
 import { DataTable } from "@/components/ui/data-table";
-import { User, Announcement } from "@shared/schema";
+import { users, announcements } from "@shared/schema";
 import { format } from "date-fns";
 import { Link } from "wouter";
-import { PlusIcon, UserPlus, Settings, Bell, Users, FileText, BookOpen } from "lucide-react";
+import { PlusIcon, UserPlus, Settings, Bell, Users, FileText, BookOpen, Calendar } from "lucide-react";
 
 // Define type for user without password
-type UserWithoutPassword = Omit<User, "password">;
+type UserWithoutPassword = Omit<typeof users.$inferSelect, "password">;
+type Announcement = typeof announcements.$inferSelect;
+
+interface QuickActionCardProps {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
+const QuickActionCard = ({ title, description, icon, onClick }: QuickActionCardProps) => (
+  <div className="bg-white rounded-lg shadow p-6 cursor-pointer hover:shadow-md transition-shadow">
+    <div className="flex justify-center mb-4">
+      {icon}
+    </div>
+    <h3 className="text-lg font-semibold text-center mb-2">{title}</h3>
+    <p className="text-gray-600 text-center mb-4">{description}</p>
+    <button
+      onClick={onClick}
+      className="w-full bg-[#1976D2] hover:bg-[#1976D2]/90 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors"
+    >
+      Go to {title}
+    </button>
+  </div>
+);
 
 export function AdminDashboard() {
   const { user } = useAuth();
@@ -33,16 +57,6 @@ export function AdminDashboard() {
       action: {
         label: "Manage Users",
         onClick: () => window.location.href = "/users",
-      },
-    },
-    {
-      title: "System Settings",
-      description: "Configure system preferences",
-      variant: "secondary" as const,
-      icon: <Settings className="h-10 w-10 text-[#4CAF50] mb-2" />,
-      action: {
-        label: "Settings",
-        onClick: () => window.location.href = "/settings",
       },
     },
     {
@@ -110,21 +124,7 @@ export function AdminDashboard() {
           {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
         </span>
       ),
-    },
-    {
-      key: "actions",
-      header: "Actions",
-      cell: (_user: UserWithoutPassword) => (
-        <div className="flex space-x-2">
-          <button className="text-[#1976D2] hover:text-[#1976D2]/80 text-sm">
-            Edit
-          </button>
-          <button className="text-[#F44336] hover:text-[#F44336]/80 text-sm">
-            Delete
-          </button>
-        </div>
-      ),
-    },
+    }
   ];
 
   return (
@@ -156,46 +156,35 @@ export function AdminDashboard() {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {quickActions.map((action, i) => (
-          <DashboardCard
-            key={i}
-            title={action.title}
-            description={action.description}
-            variant={action.variant}
-            className="text-center"
-          >
-            <div className="flex justify-center my-4">
-              {action.icon}
-            </div>
-            <button
-              onClick={action.action.onClick}
-              className={`w-full ${
-                action.variant === "primary"
-                  ? "bg-[#1976D2] hover:bg-[#1976D2]/90"
-                  : action.variant === "secondary"
-                  ? "bg-[#4CAF50] hover:bg-[#4CAF50]/90"
-                  : "bg-[#FF5722] hover:bg-[#FF5722]/90"
-              } text-white px-4 py-2 rounded-md text-sm font-medium transition-colors`}
-            >
-              {action.action.label}
-            </button>
-          </DashboardCard>
-        ))}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <QuickActionCard
+          title="User Management"
+          description="Manage user accounts and permissions"
+          icon={<Users className="h-6 w-6" />}
+          onClick={() => window.location.href = "/users"}
+        />
+        <QuickActionCard
+          title="Announcements"
+          description="Create and manage announcements"
+          icon={<FileText className="h-6 w-6" />}
+          onClick={() => window.location.href = "/create"}
+        />
+        <QuickActionCard
+          title="Events"
+          description="Schedule and manage events"
+          icon={<Calendar className="h-6 w-6" />}
+          onClick={() => window.location.href = "/create?type=event"}
+        />
       </div>
 
       {/* Users Table */}
       <div className="grid grid-cols-1 gap-6 mb-8">
         <ContentCard
           title="System Users"
-          action={{
-            label: "Add User",
-            onClick: () => window.location.href = "/users",
-          }}
         >
           <DataTable<UserWithoutPassword>
-            data={users || []}
             columns={userColumns}
+            data={users || []}
             emptyState={
               usersLoading ? (
                 <div className="flex justify-center p-4">Loading users...</div>
@@ -203,9 +192,6 @@ export function AdminDashboard() {
                 <div className="flex flex-col items-center p-6">
                   <PlusIcon className="h-12 w-12 text-[#1976D2]/30 mb-2" />
                   <p className="text-[#2C3E50]/70">No users found</p>
-                  <Link href="/users">
-                    <a className="mt-2 text-[#1976D2] hover:underline">Add users</a>
-                  </Link>
                 </div>
               )
             }
